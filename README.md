@@ -8,6 +8,7 @@
 - **细粒度溯源**：综述中每一条核心临床论断均锚定 `[PMID:xxx]`，并提供原文链接与开放获取（Open Access）PDF 链接。
 - **证据等级分级**：依据 Oxford CEBM 与 GRADE 体系，自动区分 Level 1（Meta分析/系统评价）至 Level 5（个案报告/叙述性综述）。
 - **防幻觉门禁**：通过 NLI（自然语言推理）与语义蕴含比对，验证论述是否真由被引文献摘要支持，计算引用准确率与幻觉率。
+- **撤稿检查**：被引文献若后来被撤稿，摘要核验是查不出来的。流水线在检索后对每批 PMID 查 PubMed 撤稿标记（`Retracted Publication`），综述中打 ⚠️ 警示、核验报告单独列出，Streamlit 文献卡片显示撤稿徽标。
 - **零依赖优雅降级**：无网络或无 API Key 时自动降级至确定性循证规则模板与内置经典临床研究数据库，保证 100% 离线可运行。
 - 参考项目：[aipoch/medical-research-skills](https://github.com/aipoch/medical-research-skills)
 
@@ -23,9 +24,10 @@ flowchart LR
     RETR -->|PubMed E-Utilities| PM[ESearch → ESummary → EFetch\n真实摘要 + Medline 文献类型]
     RETR -->|Semantic Scholar| S2[被引数 + 开放 PDF]
     RETR -->|无网络/零结果| MK[本地精标库降级]
-    PM --> GR[Oxford CEBM 证据分级\nLevel 1~5]
-    S2 --> GR
-    MK --> GR
+    PM --> RC[撤稿检查\nE-utilities 批量查 Retracted Publication]
+    S2 --> RC
+    MK --> RC
+    RC --> GR[Oxford CEBM 证据分级\nLevel 1~5]
     GR --> RK[重排：相关度 + 证据权重 + 时效]
     RK --> GEN{综述生成}
     GEN -->|有 LLM Key| LLM[LLM 润色\n严格引用约束 prompt]
@@ -144,13 +146,24 @@ python3 src/main.py -q "SGLT-2抑制剂对心衰伴射血分数保留(HFpEF)患�
 
 ---
 
+## 撤稿检查（Retraction Check）
+
+NIH/NLM 于 2026-09-24 上线了 PubMed 新工具 [Linked Discoveries](https://www.nih.gov/news-events/news-releases/nih-launches-new-pubmed-tool-strengthen-research-replication-reproducibility)，把撤稿、勘误作为核心文献上下文公开呈现。受此启发，本项目补上了 plan.md 早年写下但未实现的「排除撤稿文献」：
+
+- **原理**：一篇已撤稿论文的摘要读起来可能完全正常，摘要核验查不出来。流水线在检索后新增 `retraction_check` 节点，对每批 PMID 用 E-utilities 查 `Retracted Publication` 标记——先用已获取的题录出版类型（零额外请求），再对 PubMed 来源做一次批量 ESearch 实时交叉核验（单次请求，fail-open，网络失败不中断流水线）。
+- **呈现**：综述正文对撤稿文献打 ⚠️ 警示并声明其结论不应作为证据；核验报告单独列出 `retracted_pmids` 与警示语；Streamlit 文献卡片显示红色撤稿徽标，参考文献表新增「撤稿状态」列。
+- **诚实说明**：Linked Discoveries 目前只有网页版、无公开 API，这里走的是 E-utilities（同一 PubMed 数据源）；撤稿检查是独立于幻觉率的并行警示通道，不改变原有的引用准确率/幻觉率计算口径。
+
+---
+
 ## 评测与已知局限（诚实版）
 
 | 维度 | 结果 |
 |---|---|
-| 自动化测试 | 17/17 通过（含抽取式生成约束、跨语言核验不确定性等用例） |
+| 自动化测试 | 27/27 通过（含撤稿检查 10 项：元数据标记、实时批量核验、核验器/综述/节点集成） |
 | Mock 数据全链路 | 引用准确率 100%，幻觉率 0% |
 | 真实 PubMed 全链路（SGLT-2/HFpEF） | 引用准确率 100%，幻觉率 0%，证据分级与 NLM 文献类型一致 |
+| 真实撤稿检出探针 | 已知撤稿文献 PMID:9500320（Wakefield 1998）被实时核验正确检出，对照正常文献 PMID:36027570 未误标 |
 
 **已知局限**：
 

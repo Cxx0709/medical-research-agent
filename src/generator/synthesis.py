@@ -43,11 +43,12 @@ class ReviewSynthesizer:
         for idx, p in enumerate(papers, 1):
             level_str = p.evidence_level.value if p.evidence_level else "Unknown"
             type_str = p.study_type.value if p.study_type else "Unknown"
+            retract_flag = "\n    ⚠️ 已撤稿 (RETRACTED)：该文献结论不可靠，不应作为证据引用" if p.retracted else ""
             lit_context.append(
                 f"[{idx}] PMID: {p.pmid}\n"
                 f"    标题: {p.title}\n"
                 f"    期刊与年份: {p.journal} ({p.pub_year})\n"
-                f"    设计与分级: {type_str} | {level_str}\n"
+                f"    设计与分级: {type_str} | {level_str}{retract_flag}\n"
                 f"    摘要核心: {p.abstract[:600]}\n"
             )
         literature_str = "\n".join(lit_context)
@@ -59,7 +60,9 @@ class ReviewSynthesizer:
             "1. 坚守「无来源不生成（No Citation, No Claim）」原则，严禁臆造文献、结论或超出摘要的事实。\n"
             "2. 每一个核心疗效结论、终点数据、亚组分析结论后，必须标注引用标记 [PMID:xxxx]。\n"
             "3. 保持客观中立，明确指出研究局限性与证据不足之处。\n"
-            "4. 输出格式为标准 Markdown，并包含以下四个固定板块：\n"
+            "4. 若某篇文献在上下文中被标注为「已撤稿 (RETRACTED)」，必须在正文中明确警示其结论不可靠、"
+            "不应作为证据引用，不得将其结论当作有效证据陈述。\n"
+            "5. 输出格式为标准 Markdown，并包含以下四个固定板块：\n"
             "   # 医学文献研究综述：<问题>\n"
             "   > 临床 PICO 结构解析...\n"
             "   ## 1. 核心临床结论 (Executive Clinical Summary)\n"
@@ -146,9 +149,18 @@ class ReviewSynthesizer:
         review_parts.append("## 1. 证据概览 (Evidence Landscape)\n")
         dist = ", ".join(f"Level {lv} × {len(ps)}" for lv, ps in sorted(groups.items()) if lv <= 5)
         top_level = min([lv for lv in groups if lv <= 5], default=5)
+        retracted = [p for p in papers if p.retracted]
+        retract_line = ""
+        if retracted:
+            retract_pmids = "、".join(f"[PMID:{p.pmid}]" for p in retracted)
+            retract_line = (
+                f"- ⚠️ **撤稿警示**：本次纳入的文献中有 **{len(retracted)}** 篇被 PubMed 标记为已撤稿"
+                f"（{retract_pmids}），其结论不应作为临床证据使用，下文已逐条标注。\n"
+            )
         review_parts.append(
             f"- 本次共纳入 **{len(papers)}** 篇文献，证据等级分布：{dist or '未分级'}；"
             f"其中最高等级为 **Level {top_level}**。\n"
+            + retract_line +
             "- 以下每条结论均直接转述自所引文献的题目与摘要原文，结论后的 [PMID:xxxx] 为其唯一来源；"
             "凡无来源支撑的推断，本综述一律不写（「无来源不生成」）。\n"
         )
@@ -169,10 +181,11 @@ class ReviewSynthesizer:
             for p in groups[lv]:
                 excerpt = self._abstract_excerpt(p.abstract)
                 type_str = p.study_type.value if p.study_type else "未知设计"
+                retract_prefix = "⚠️【已撤稿，该文献结论不应作为证据使用】" if p.retracted else ""
                 if excerpt:
-                    stmt = f"【{type_str}｜《{p.journal}》({p.pub_year})】{p.title}。{excerpt} [PMID:{p.pmid}]"
+                    stmt = f"{retract_prefix}【{type_str}｜《{p.journal}》({p.pub_year})】{p.title}。{excerpt} [PMID:{p.pmid}]"
                 else:
-                    stmt = f"【{type_str}｜《{p.journal}》({p.pub_year})】{p.title}（本条仅有题录信息，摘要缺失，未做内容转述） [PMID:{p.pmid}]"
+                    stmt = f"{retract_prefix}【{type_str}｜《{p.journal}》({p.pub_year})】{p.title}（本条仅有题录信息，摘要缺失，未做内容转述） [PMID:{p.pmid}]"
                 review_parts.append(f"- {stmt}")
                 claims.append(AtomicClaim(claim_id=f"C{claim_counter}", statement=stmt, cited_pmids=[p.pmid]))
                 claim_counter += 1
@@ -184,6 +197,8 @@ class ReviewSynthesizer:
             "- 本综述基于本次检索到的有限文献摘要转述，未做全文偏倚风险评估（如随机化隐藏、失访率），证据强度解读需谨慎。\n"
             "- 各研究在人群特征、干预剂量与随访时长上存在异质性，结论不宜直接外推至未覆盖人群。\n"
             "- 文献检索存在发表偏倚可能；临床决策请结合最新指南与患者个体情况，并咨询专科医生。\n"
+            + ("- ⚠️ 本次纳入文献中存在已撤稿论文（见上文标注），撤稿文献的结论不可靠，不应纳入证据体。\n"
+               if any(p.retracted for p in papers) else "")
         )
 
         # 4. 参考文献清单（支持点击溯源）

@@ -95,6 +95,10 @@ flowchart TD
   - **研究类型先验权重**：Meta分析(1.0) > RCT(0.9) > 队列研究(0.7) > 病例对照(0.5) > 病例报告(0.3)。
   - **时效衰减**：近 3~5 年发表的文献优先。
   - **硬性过滤**：排除撤稿文献（Retracted）、过滤无摘要文献。
+    - *（2026-09-30 已落地：`retraction_check` 节点，见 `src/verification/retraction.py`。*
+      *对每批 PMID 先用题录出版类型标记，再用 E-utilities 批量 ESearch 实时交叉核验；*
+      *综述打 ⚠️ 警示、核验报告单独列出、Streamlit 卡片显示撤稿徽标。注意是「标记警示」而非静默删除，*
+      *以便用户知晓证据缺口。）*
 
 ### 模块 3：证据等级标注模块 (Evidence Level Grading)
 参考 Oxford CEBM（牛津循证医学中心）分级标准与 GRADE 原则：

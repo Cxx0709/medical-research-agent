@@ -13,6 +13,7 @@ from src.ranking.ranker import LiteratureRanker
 from src.evidence.grader import EvidenceGrader
 from src.generator.synthesis import ReviewSynthesizer
 from src.verification.verifier import CitationVerifier
+from src.verification.retraction import RetractionChecker
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +154,33 @@ def retrieval_node(state: MedicalResearchState) -> Dict[str, Any]:
     }
 
 
+def retraction_check_node(state: MedicalResearchState) -> Dict[str, Any]:
+    """Node 2b: Retraction Check - Flag retracted publications in the batch.
+
+    A retracted paper can still have a perfectly readable abstract, so the
+    abstract-support check alone cannot catch it. This node flags papers
+    PubMed marks as "Retracted Publication" (metadata first, then one live
+    E-utilities batch cross-check for the pubmed source). Fail-open: a
+    network error keeps metadata flags and never breaks the pipeline.
+    """
+    retrieved = state.get("retrieved_papers", [])
+    papers = [Paper(**p) for p in retrieved]
+    source = (state.get("retriever_source") or "pubmed").lower().strip()
+
+    checker = RetractionChecker()
+    # Live cross-check only for the pubmed source; other sources may lack
+    # PMIDs or publication types, and the metadata pass already ran.
+    checker.check_papers(papers, live_cross_check=(source == "pubmed"))
+
+    flagged = sum(1 for p in papers if p.retracted)
+    if flagged:
+        logger.warning(f"Retraction check flagged {flagged}/{len(papers)} papers as retracted.")
+
+    return {
+        "retrieved_papers": [p.model_dump() for p in papers]
+    }
+
+
 def annotation_node(state: MedicalResearchState) -> Dict[str, Any]:
     """Node 3: Annotate study design and assign Oxford CEBM evidence level."""
     retrieved = state.get("retrieved_papers", [])
@@ -228,6 +256,15 @@ def finalize_node(state: MedicalResearchState) -> Dict[str, Any]:
     hallucination_rate = report_dict.get("hallucination_rate", 0.0) * 100
     total_claims = report_dict.get("total_claims", 0)
     supported_claims = report_dict.get("supported_claims", 0)
+    retracted_pmids = report_dict.get("retracted_pmids", []) or []
+    retraction_line = ""
+    if retracted_pmids:
+        pmid_str = ", ".join(f"[PMID:{p}]" for p in retracted_pmids)
+        retraction_line = (
+            f"- **撤稿警示 (Retraction Alert)** ⚠️: 本次引用的文献中有 `{len(retracted_pmids)}` 篇"
+            f"被 PubMed 标记为已撤稿：{pmid_str}。撤稿文献的结论不应作为临床证据使用，"
+            "请勿引用。\n"
+        )
 
     quality_banner = (
         "\n---\n"
@@ -235,6 +272,7 @@ def finalize_node(state: MedicalResearchState) -> Dict[str, Any]:
         f"- **引用准确率 (Citation Precision)**: `{precision:.1f}%`\n"
         f"- **幻觉率 (Hallucination Rate)**: `{hallucination_rate:.1f}%`\n"
         f"- **核验论断数**: 共 `{total_claims}` 条核心论断，其中 `{supported_claims}` 条通过原文摘要严格溯源核验。\n"
+        + retraction_line +
         f"- **质检状态**: `{'✅ 已通过「无来源不生成」防幻觉门禁' if report_dict.get('passed_guardrail', True) else '⚠️ 存在部分未核验引用'}`\n"
     )
 

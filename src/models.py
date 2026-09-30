@@ -57,6 +57,8 @@ class Paper(BaseModel):
     relevance_score: float = Field(0.0, description="Calculated relevance score to query")
     citation_count: int = Field(0, description="Academic citation count")
     open_access_pdf: str = Field("", description="URL to Open Access PDF if available")
+    retracted: bool = Field(False, description="True if PubMed marks this paper as retracted")
+    retraction_note: str = Field("", description="Human-readable note on the retraction status")
 
     @property
     def pubmed_url(self) -> str:
@@ -84,3 +86,5 @@ class VerificationReport(BaseModel):
     hallucination_rate: float = 0.0  # claims with 0 supported sources / total claims
     claims: List[AtomicClaim] = Field(default_factory=list)
     passed_guardrail: bool = True
+    retracted_pmids: List[str] = Field(default_factory=list, description="Cited PMIDs flagged as retracted")
+    retraction_warnings: List[str] = Field(default_factory=list, description="Human-readable retraction warnings")

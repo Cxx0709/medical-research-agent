@@ -68,6 +68,25 @@ class CitationVerifier:
         precision = (supported_citations / total_citations) if total_citations > 0 else 0.0
         hallucination_rate = (unsupported_count / len(verified_claims)) if verified_claims else 0.0
 
+        # Retraction signal: a retracted paper can have a readable abstract,
+        # so abstract-support alone cannot catch it. Flag it separately --
+        # this does not change the hallucination guardrail math, it adds a
+        # parallel warning channel.
+        retracted_pmids: List[str] = []
+        retraction_warnings: List[str] = []
+        for claim in verified_claims:
+            for pmid in claim.cited_pmids:
+                paper = paper_dict.get(pmid)
+                if paper and paper.retracted and pmid not in retracted_pmids:
+                    retracted_pmids.append(pmid)
+                    note = paper.retraction_note or "PubMed 标记为已撤稿"
+                    retraction_warnings.append(
+                        f"⚠️ 论断 [{claim.claim_id}] 引用的 PMID:{pmid} 已撤稿（{note}），"
+                        "其结论不应作为临床证据使用。"
+                    )
+                    claim.explanation = (claim.explanation + " " if claim.explanation else "") + \
+                        f"⚠️ 注意：PMID:{pmid} 已撤稿，引用该文献存在风险。"
+
         return VerificationReport(
             total_claims=len(verified_claims),
             supported_claims=supported_count,
@@ -76,6 +95,8 @@ class CitationVerifier:
             hallucination_rate=round(hallucination_rate, 4),
             claims=verified_claims,
             passed_guardrail=(hallucination_rate == 0.0 and precision >= 0.95),
+            retracted_pmids=retracted_pmids,
+            retraction_warnings=retraction_warnings,
         )
 
     def _check_support(self, claim_text: str, paper: Paper) -> Tuple[bool, str]:

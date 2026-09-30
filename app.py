@@ -195,6 +195,12 @@ def main():
             m3.metric("核验论断数", f"{supported_claims} / {total_claims}")
             m4.metric("防幻觉门禁状态", "✅ 已通过" if rep.get("passed_guardrail", True) else "⚠️ 部分未核验")
 
+            retraction_warnings = rep.get("retraction_warnings", []) or []
+            if retraction_warnings:
+                st.error("⚠️ **撤稿警示**：以下被引文献已被 PubMed 标记为撤稿，其结论不应作为临床证据使用：")
+                for w in retraction_warnings:
+                    st.warning(w)
+
             st.write("#### 逐条论断-来源文献核验明细")
             claims = rep.get("claims", [])
             if claims:
@@ -231,6 +237,8 @@ def main():
                     with st.container(border=True):
                         col_t, col_a = st.columns([4, 1])
                         with col_t:
+                            if p.get("retracted"):
+                                st.error(f"⚠️ 该文献已被撤稿 (Retracted) — {p.get('retraction_note', 'PubMed 标记')}")
                             st.markdown(f"**{p.get('title')}**")
                             st.caption(f"📖 {p.get('journal', 'Unknown')} ({p.get('pub_year', 'N/A')}) | 作者: {', '.join(p.get('authors', [])[:3])}")
                         with col_a:
@@ -261,6 +269,7 @@ def main():
                     "期刊": p.get("journal"),
                     "年份": p.get("pub_year"),
                     "被引数": p.get("citation_count", 0),
+                    "撤稿状态": "⚠️ 已撤稿" if p.get("retracted") else "正常",
                     "PubMed链接": f"https://pubmed.ncbi.nlm.nih.gov/{p.get('pmid')}/",
                 })
             st.dataframe(table_data, use_container_width=True)
